@@ -16,7 +16,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/* ================= iOS 配色 ================= */
 object IosColor {
     val bg = Color(0xFFF2F2F7)
     val card = Color(0xFFFFFFFF)
@@ -31,13 +30,13 @@ object IosColor {
 }
 
 object IosRadius {
-    val card = 16.dp
-    val button = 10.dp
-    val smallButton = 8.dp
-    val largeButton = 14.dp
+    val card = 24.dp
+    val button = 14.dp
+    val smallButton = 10.dp
+    val largeButton = 20.dp
+    val capsule = 999.dp
 }
 
-/* ================= 顶栏图标按钮 ================= */
 @Composable
 fun RowScope.IosIconButton(
     icon: ImageVector,
@@ -53,40 +52,40 @@ fun RowScope.IosIconButton(
     ) {
         Icon(
             icon,
-            contentDescription = contentDescription,
+            contentDescription,
             tint = IosColor.primary,
             modifier = Modifier.size(22.dp)
         )
     }
 }
 
-/* ================= Section 标题 ================= */
 @Composable
 fun IosSectionHeader(text: String, trailing: String? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp),
+            .padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text.uppercase(),
-            fontSize = 13.sp,
+            fontSize = 12.sp,
             color = IosColor.groupHeader,
-            fontWeight = FontWeight.Medium,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.8.sp,
             modifier = Modifier.weight(1f)
         )
         if (trailing != null) {
             Text(
                 trailing,
-                fontSize = 13.sp,
-                color = IosColor.groupHeader
+                fontSize = 12.sp,
+                color = IosColor.groupHeader,
+                fontWeight = FontWeight.Medium
             )
         }
     }
 }
 
-/* ================= 分割线（缩进） ================= */
 @Composable
 fun IosDivider(startPadding: Int = 56) {
     Box(

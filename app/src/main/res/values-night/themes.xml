@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+      深色模式下使用深色平台主题。
+
+      values/themes.xml 里的父主题是 android:Theme.Material.Light.NoActionBar，
+      系统切成深色模式时窗口背景仍是浅色：Compose 首帧渲染出来之前、
+      以及状态栏 / 导航栏（enableEdgeToEdge 之后是透明的）后面那块区域
+      会先闪一下白。这里按夜间资源覆盖成深色主题即可。
+    -->
+    <style name="Theme.MoodDiary" parent="android:Theme.Material.NoActionBar" />
+</resources>

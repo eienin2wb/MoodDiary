@@ -1,32 +1,26 @@
 package com.example.mooddiary.data
 
-/**
- * 五种情绪类型
- * emoji：显示的图标
- * label：中文名
- */
-enum class Mood(val emoji: String, val label: String) {
-    HAPPY("😊", "开心"),
-    CALM("😌", "平静"),
-    SAD("😔", "难过"),
-    ANGRY("😠", "生气"),
-    ANXIOUS("😰", "焦虑")
+enum class Mood(val emoji: String, val key: String, val label: String) {
+    HAPPY("😊", "mood_happy", "开心"),
+    CALM("😌", "mood_calm", "平静"),
+    SAD("😔", "mood_sad", "难过"),
+    ANGRY("😠", "mood_angry", "生气"),
+    ANXIOUS("😰", "mood_anxious", "焦虑")
 }
 
-/**
- * 一条情绪日记
- * 每天一条（同一天再记会覆盖）
- *
- * @param id       自增 ID
- * @param mood     情绪类型
- * @param intensity 强度 1~5
- * @param note     文字备注（可空）
- * @param dayStart 那一天的 00:00 时间戳（用于按天查询/去重）
- */
+/** 用户自定义情绪（长期保留） */
+data class CustomMoodDef(
+    val id: String,        // "cm_<timestamp>"
+    val emoji: String,
+    val label: String
+)
+
 data class MoodEntry(
     val id: Long,
-    val mood: Mood,
+    val mood: Mood,                        // 预设情绪（当 customMoodId != null 时用于兜底）
     val intensity: Int,
     val note: String,
-    val dayStart: Long
+    val dayStart: Long,
+    val imageUri: String? = null,          // 记录自带背景照片
+    val customMoodId: String? = null       // 若不为空，用自定义情绪
 )

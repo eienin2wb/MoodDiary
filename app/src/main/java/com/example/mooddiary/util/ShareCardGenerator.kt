@@ -9,18 +9,23 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.toColorInt
+import com.example.mooddiary.data.CustomMoodDef
+import com.example.mooddiary.data.CustomMoodStyle
 import com.example.mooddiary.data.Mood
 import com.example.mooddiary.data.MoodEntry
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class CardTemplate(val label: String) {
-    CLASSIC("经典"),
-    MINIMAL("简约"),
-    PAPER("杂志"),
-    DARK("暗夜"),
-    NOTE("便签")
+enum class CardTemplate(val key: String) {
+    NATIONAL_DAY("tpl_national"),
+    CLASSIC("tpl_classic"),
+    MINIMAL("tpl_minimal"),
+    PAPER("tpl_paper"),
+    DARK("tpl_dark"),
+    NOTE("tpl_note")
 }
 
 object ShareCardGenerator {
@@ -28,34 +33,79 @@ object ShareCardGenerator {
     private const val W = 1080
     private const val H = 1920
 
+    /* ================= 自定义情绪解析 ================= */
+
+    /** 读取最终 emoji：自定义情绪 > 全局样式 > 预设情绪 */
+    private fun finalEmoji(
+        entry: MoodEntry,
+        customs: Map<Mood, CustomMoodStyle>,
+        customMoodDefs: List<CustomMoodDef>
+    ): String {
+        val cmId = entry.customMoodId
+        if (cmId != null) {
+            customMoodDefs.firstOrNull { it.id == cmId }?.let { return it.emoji }
+        }
+        return customs[entry.mood]?.emoji?.takeIf { it.isNotBlank() } ?: entry.mood.emoji
+    }
+
+    /** 读取最终 label：自定义情绪 > 全局样式 > 语言翻译 */
+    private fun finalLabel(
+        entry: MoodEntry,
+        customs: Map<Mood, CustomMoodStyle>,
+        customMoodDefs: List<CustomMoodDef>,
+        lang: String
+    ): String {
+        val cmId = entry.customMoodId
+        if (cmId != null) {
+            customMoodDefs.firstOrNull { it.id == cmId }?.let { return it.label }
+        }
+        return customs[entry.mood]?.label?.takeIf { it.isNotBlank() }
+            ?: L.t(entry.mood.key, lang)
+    }
+
+    private fun localeOf(lang: String): Locale = when (lang) {
+        "zh" -> Locale.CHINA
+        "en" -> Locale.US
+        "ko" -> Locale.KOREA
+        "ja" -> Locale.JAPAN
+        "es" -> Locale.forLanguageTag("es-ES")
+        else -> Locale.CHINA
+    }
+
+    /* ================= 对外入口 ================= */
+
     fun generate(
         entry: MoodEntry,
-        template: CardTemplate = CardTemplate.CLASSIC,
+        template: CardTemplate = CardTemplate.NATIONAL_DAY,
         showWatermark: Boolean = true,
-        showDate: Boolean = true
+        showDate: Boolean = true,
+        lang: String = "zh",
+        customs: Map<Mood, CustomMoodStyle> = emptyMap(),
+        customMoodDefs: List<CustomMoodDef> = emptyList()
     ): Bitmap {
-        val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val bmp = createBitmap(W, H, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-
         when (template) {
-            CardTemplate.CLASSIC -> drawClassic(canvas, entry, showWatermark, showDate)
-            CardTemplate.MINIMAL -> drawMinimal(canvas, entry, showWatermark, showDate)
-            CardTemplate.PAPER   -> drawPaper(canvas, entry, showWatermark, showDate)
-            CardTemplate.DARK    -> drawDark(canvas, entry, showWatermark, showDate)
-            CardTemplate.NOTE    -> drawNoteTemplate(canvas, entry, showWatermark, showDate)
+            CardTemplate.NATIONAL_DAY -> drawNationalDay(canvas, entry, showWatermark, showDate, lang, customs, customMoodDefs)
+            CardTemplate.CLASSIC      -> drawClassic(canvas, entry, showWatermark, showDate, lang, customs, customMoodDefs)
+            CardTemplate.MINIMAL      -> drawMinimal(canvas, entry, showWatermark, showDate, lang, customs, customMoodDefs)
+            CardTemplate.PAPER        -> drawPaper(canvas, entry, showWatermark, showDate, lang, customs, customMoodDefs)
+            CardTemplate.DARK         -> drawDark(canvas, entry, showWatermark, showDate, lang, customs, customMoodDefs)
+            CardTemplate.NOTE         -> drawNoteTemplate(canvas, entry, showWatermark, showDate, lang, customs, customMoodDefs)
         }
-
         return bmp
     }
 
-    /** 用自定义照片作为背景 */
     fun generateWithPhoto(
         entry: MoodEntry,
         photo: Bitmap,
         showWatermark: Boolean = true,
-        showDate: Boolean = true
+        showDate: Boolean = true,
+        lang: String = "zh",
+        customs: Map<Mood, CustomMoodStyle> = emptyMap(),
+        customMoodDefs: List<CustomMoodDef> = emptyList()
     ): Bitmap {
-        val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+        val bmp = createBitmap(W, H, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
 
         val src = cropCenter(photo, W, H)
@@ -82,9 +132,8 @@ object ShareCardGenerator {
         canvas.drawRect(0f, H * 0.5f, W.toFloat(), H.toFloat(), bottomMask)
 
         val white = Color.WHITE
-
-        drawEmoji(canvas, entry, 660f, 260f)
-        drawLabel(canvas, entry, 830f, 88f, white)
+        drawEmoji(canvas, entry, 660f, 260f, customs, customMoodDefs)
+        drawLabel(canvas, entry, 830f, 88f, white, lang, customs, customMoodDefs)
         drawStars(canvas, entry, 950f, 64f, white)
 
         val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -93,8 +142,8 @@ object ShareCardGenerator {
         canvas.drawLine(W * 0.2f, 1030f, W * 0.8f, 1030f, linePaint)
 
         drawNote(canvas, entry, 1140f, 50f, white, (W * 0.78f).toInt())
-        if (showDate) drawDate(canvas, entry, H - 250f, 42f, white)
-        if (showWatermark) drawWatermark(canvas, H - 170f, 34f, white)
+        if (showDate) drawDate(canvas, entry, H - 250f, 42f, white, lang)
+        if (showWatermark) drawWatermark(canvas, H - 170f, 34f, white, lang)
 
         return bmp
     }
@@ -104,7 +153,6 @@ object ShareCardGenerator {
         val srcH = src.height
         val srcRatio = srcW.toFloat() / srcH
         val targetRatio = targetW.toFloat() / targetH
-
         return if (srcRatio > targetRatio) {
             val newW = (srcH * targetRatio).toInt()
             val x = (srcW - newW) / 2
@@ -116,7 +164,115 @@ object ShareCardGenerator {
         }
     }
 
-    private fun drawClassic(canvas: Canvas, entry: MoodEntry, wm: Boolean, date: Boolean) {
+    /* ================= 国庆 ================= */
+
+    private fun drawNationalDay(
+        canvas: Canvas, entry: MoodEntry,
+        wm: Boolean, date: Boolean, lang: String,
+        customs: Map<Mood, CustomMoodStyle>,
+        customMoodDefs: List<CustomMoodDef>
+    ) {
+        val red1 = "#C8102E".toColorInt()
+        val red2 = "#8B0000".toColorInt()
+        val gold = "#FFD700".toColorInt()
+
+        val bgPaint = Paint().apply {
+            shader = LinearGradient(0f, 0f, 0f, H.toFloat(), red1, red2, Shader.TileMode.CLAMP)
+        }
+        canvas.drawRect(0f, 0f, W.toFloat(), H.toFloat(), bgPaint)
+
+        val decoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = gold; alpha = 90 }
+        val deco = listOf(
+            Triple(80f, 700f, 8f), Triple(1000f, 500f, 10f),
+            Triple(120f, 1400f, 6f), Triple(950f, 1250f, 8f),
+            Triple(180f, 500f, 5f), Triple(920f, 800f, 6f),
+            Triple(500f, 1650f, 5f), Triple(850f, 1550f, 7f),
+            Triple(200f, 1000f, 6f), Triple(880f, 1050f, 5f)
+        )
+        deco.forEach { (x, y, r) -> drawStar5(canvas, x, y, r, decoPaint) }
+
+        val flagStar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = gold }
+        drawStar5(canvas, 130f, 150f, 38f, flagStar)
+        drawStar5(canvas, 210f, 100f, 16f, flagStar)
+        drawStar5(canvas, 245f, 150f, 16f, flagStar)
+        drawStar5(canvas, 245f, 205f, 16f, flagStar)
+        drawStar5(canvas, 210f, 255f, 16f, flagStar)
+
+        val lanternPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = gold }
+        canvas.drawCircle(W - 120f, 120f, 22f, lanternPaint)
+        canvas.drawRect(W - 130f, 100f, W - 110f, 108f, lanternPaint)
+        canvas.drawRect(W - 130f, 142f, W - 110f, 150f, lanternPaint)
+        canvas.drawLine(W - 120f, 78f, W - 120f, 98f, lanternPaint)
+
+        val yearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = gold; textSize = 44f
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            letterSpacing = 0.15f
+        }
+        canvas.drawText("1949 · 2026", W / 2f, 380f, yearPaint)
+
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = gold; textSize = 130f
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        canvas.drawText(L.t("national_title", lang), W / 2f, 540f, titlePaint)
+
+        val linePaint = Paint().apply {
+            color = gold; strokeWidth = 3f; alpha = 200
+        }
+        canvas.drawLine(W * 0.28f, 610f, W * 0.72f, 610f, linePaint)
+        val sideStar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = gold }
+        drawStar5(canvas, W * 0.24f, 610f, 10f, sideStar)
+        drawStar5(canvas, W * 0.76f, 610f, 10f, sideStar)
+
+        drawEmoji(canvas, entry, 1020f, 260f, customs, customMoodDefs)
+        drawLabel(canvas, entry, 1180f, 92f, Color.WHITE, lang, customs, customMoodDefs)
+        drawStars(canvas, entry, 1300f, 68f, gold)
+
+        val divider = Paint().apply {
+            color = gold; strokeWidth = 3f; alpha = 150
+        }
+        canvas.drawLine(W * 0.22f, 1400f, W * 0.78f, 1400f, divider)
+
+        drawNote(canvas, entry, 1500f, 50f, Color.WHITE, (W * 0.78f).toInt())
+        if (date) drawDate(canvas, entry, H - 280f, 42f, gold, lang)
+
+        if (wm) {
+            val markPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = gold; textSize = 34f
+                textAlign = Paint.Align.CENTER
+                alpha = 220
+            }
+            canvas.drawText(L.t("watermark_national", lang), W / 2f, H - 180f, markPaint)
+        }
+    }
+
+    private fun drawStar5(canvas: Canvas, cx: Float, cy: Float, radius: Float, paint: Paint) {
+        val path = Path()
+        val outer = radius
+        val inner = radius * 0.42f
+        val step = (Math.PI / 5).toFloat()
+        var angle = -Math.PI.toFloat() / 2
+        path.moveTo(cx + outer * kotlin.math.cos(angle), cy + outer * kotlin.math.sin(angle))
+        for (i in 1 until 10) {
+            val r = if (i % 2 == 0) outer else inner
+            angle += step
+            path.lineTo(cx + r * kotlin.math.cos(angle), cy + r * kotlin.math.sin(angle))
+        }
+        path.close()
+        canvas.drawPath(path, paint)
+    }
+
+    /* ================= 经典 ================= */
+
+    private fun drawClassic(
+        canvas: Canvas, entry: MoodEntry,
+        wm: Boolean, date: Boolean, lang: String,
+        customs: Map<Mood, CustomMoodStyle>,
+        customMoodDefs: List<CustomMoodDef>
+    ) {
         val (c1, c2) = bgColors(entry.mood)
         val bgPaint = Paint().apply {
             shader = LinearGradient(0f, 0f, 0f, H.toFloat(), c1, c2, Shader.TileMode.CLAMP)
@@ -124,8 +280,8 @@ object ShareCardGenerator {
         canvas.drawRect(0f, 0f, W.toFloat(), H.toFloat(), bgPaint)
 
         val textColor = darkTextColor(entry.mood)
-        drawEmoji(canvas, entry, 660f, 260f)
-        drawLabel(canvas, entry, 830f, 88f, textColor)
+        drawEmoji(canvas, entry, 660f, 260f, customs, customMoodDefs)
+        drawLabel(canvas, entry, 830f, 88f, textColor, lang, customs, customMoodDefs)
         drawStars(canvas, entry, 950f, 64f, textColor)
 
         val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -134,11 +290,18 @@ object ShareCardGenerator {
         canvas.drawLine(W * 0.2f, 1030f, W * 0.8f, 1030f, linePaint)
 
         drawNote(canvas, entry, 1140f, 50f, textColor, (W * 0.78f).toInt())
-        if (date) drawDate(canvas, entry, H - 250f, 42f, textColor)
-        if (wm) drawWatermark(canvas, H - 170f, 34f, textColor)
+        if (date) drawDate(canvas, entry, H - 250f, 42f, textColor, lang)
+        if (wm) drawWatermark(canvas, H - 170f, 34f, textColor, lang)
     }
 
-    private fun drawMinimal(canvas: Canvas, entry: MoodEntry, wm: Boolean, date: Boolean) {
+    /* ================= 简约 ================= */
+
+    private fun drawMinimal(
+        canvas: Canvas, entry: MoodEntry,
+        wm: Boolean, date: Boolean, lang: String,
+        customs: Map<Mood, CustomMoodStyle>,
+        customMoodDefs: List<CustomMoodDef>
+    ) {
         val moodColor = moodMainColor(entry.mood)
         canvas.drawColor(Color.WHITE)
 
@@ -146,39 +309,45 @@ object ShareCardGenerator {
         canvas.drawRect(0f, 0f, W.toFloat(), 20f, topPaint)
 
         val tagPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#999999")
-            textSize = 32f
+            color = "#999999".toColorInt(); textSize = 32f
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         canvas.drawText("M O O D   D I A R Y", W / 2f, 200f, tagPaint)
 
-        drawEmoji(canvas, entry, 720f, 240f)
-        drawLabel(canvas, entry, 900f, 90f, Color.parseColor("#1A1A1A"))
+        drawEmoji(canvas, entry, 720f, 240f, customs, customMoodDefs)
+        drawLabel(canvas, entry, 900f, 90f, "#1A1A1A".toColorInt(), lang, customs, customMoodDefs)
         drawStars(canvas, entry, 1010f, 66f, moodColor)
 
         val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#EEEEEE"); strokeWidth = 2f
+            color = "#EEEEEE".toColorInt(); strokeWidth = 2f
         }
         canvas.drawLine(W * 0.3f, 1100f, W * 0.7f, 1100f, linePaint)
 
-        drawNote(canvas, entry, 1200f, 48f, Color.parseColor("#444444"), (W * 0.7).toInt())
-        if (date) drawDate(canvas, entry, H - 260f, 40f, Color.parseColor("#999999"))
-        if (wm) drawWatermark(canvas, H - 180f, 32f, Color.parseColor("#CCCCCC"))
+        drawNote(canvas, entry, 1200f, 48f, "#444444".toColorInt(), (W * 0.7).toInt())
+        if (date) drawDate(canvas, entry, H - 260f, 40f, "#999999".toColorInt(), lang)
+        if (wm) drawWatermark(canvas, H - 180f, 32f, "#CCCCCC".toColorInt(), lang)
     }
 
-    private fun drawPaper(canvas: Canvas, entry: MoodEntry, wm: Boolean, date: Boolean) {
-        val moodColor = moodMainColor(entry.mood)
-        canvas.drawColor(Color.parseColor("#FAF6EE"))
+    /* ================= 杂志 ================= */
 
-        val topLine = Paint().apply { color = Color.parseColor("#DDD5C5") }
+    private fun drawPaper(
+        canvas: Canvas, entry: MoodEntry,
+        wm: Boolean, date: Boolean, lang: String,
+        customs: Map<Mood, CustomMoodStyle>,
+        customMoodDefs: List<CustomMoodDef>
+    ) {
+        val moodColor = moodMainColor(entry.mood)
+        canvas.drawColor("#FAF6EE".toColorInt())
+
+        val topLine = Paint().apply { color = "#DDD5C5".toColorInt() }
         canvas.drawRect(0f, 0f, W.toFloat(), 8f, topLine)
 
         val dateSdf = SimpleDateFormat("yyyy.MM.dd", Locale.CHINA)
         val dateText = dateSdf.format(Date(entry.dayStart))
 
         val metaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#8A7F6B"); textSize = 36f
+            color = "#8A7F6B".toColorInt(); textSize = 36f
         }
         canvas.drawText("ISSUE", 80f, 140f, metaPaint)
         if (date) {
@@ -186,20 +355,18 @@ object ShareCardGenerator {
         }
 
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#2A2419")
-            textSize = 140f
+            color = "#2A2419".toColorInt(); textSize = 140f
             typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
         }
-        canvas.drawText(entry.mood.label, 80f, 380f, titlePaint)
+        canvas.drawText(finalLabel(entry, customs, customMoodDefs, lang), 80f, 380f, titlePaint)
 
         val blockPaint = Paint().apply { color = moodColor }
         canvas.drawRect(80f, 440f, 280f, 456f, blockPaint)
 
         val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 360f
-            textAlign = Paint.Align.RIGHT
+            textSize = 360f; textAlign = Paint.Align.RIGHT
         }
-        canvas.drawText(entry.mood.emoji, W - 100f, 700f, emojiPaint)
+        canvas.drawText(finalEmoji(entry, customs, customMoodDefs), W - 100f, 700f, emojiPaint)
 
         val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = moodColor; textSize = 56f
@@ -207,59 +374,68 @@ object ShareCardGenerator {
         canvas.drawText(starString(entry.intensity), 80f, 560f, starPaint)
 
         val hrPaint = Paint().apply {
-            color = Color.parseColor("#DDD5C5"); strokeWidth = 2f
+            color = "#DDD5C5".toColorInt(); strokeWidth = 2f
         }
         canvas.drawLine(80f, 850f, W - 80f, 850f, hrPaint)
 
         if (entry.note.isNotBlank()) {
             val notePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#3A3226")
-                textSize = 56f
+                color = "#3A3226".toColorInt(); textSize = 56f
                 typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
             }
             val lines = wrapText(entry.note, notePaint, (W - 160))
             var y = 940f
             lines.take(8).forEach { line ->
-                canvas.drawText(line, 80f, y, notePaint)
-                y += 88f
+                canvas.drawText(line, 80f, y, notePaint); y += 88f
             }
         }
 
         if (wm) {
             val footer = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#8A7F6B"); textSize = 34f
+                color = "#8A7F6B".toColorInt(); textSize = 34f
             }
-            canvas.drawText("— 每日情绪账本 —", 80f, H - 100f, footer)
+            canvas.drawText(L.t("watermark_text", lang), 80f, H - 100f, footer)
         }
     }
 
-    private fun drawDark(canvas: Canvas, entry: MoodEntry, wm: Boolean, date: Boolean) {
+    /* ================= 暗夜 ================= */
+
+    private fun drawDark(
+        canvas: Canvas, entry: MoodEntry,
+        wm: Boolean, date: Boolean, lang: String,
+        customs: Map<Mood, CustomMoodStyle>,
+        customMoodDefs: List<CustomMoodDef>
+    ) {
         val moodColor = moodMainColor(entry.mood)
-        canvas.drawColor(Color.parseColor("#0D0D0F"))
+        canvas.drawColor("#0D0D0F".toColorInt())
 
         val glowPaint = Paint().apply {
-            shader = LinearGradient(
-                0f, 0f, 0f, 800f,
+            shader = LinearGradient(0f, 0f, 0f, 800f,
                 intArrayOf(moodColor, Color.TRANSPARENT),
-                floatArrayOf(0f, 1f),
-                Shader.TileMode.CLAMP
-            )
+                floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
             alpha = 60
         }
         canvas.drawRect(0f, 0f, W.toFloat(), 800f, glowPaint)
 
-        drawEmoji(canvas, entry, 700f, 260f)
-        drawLabel(canvas, entry, 900f, 92f, Color.WHITE)
+        drawEmoji(canvas, entry, 700f, 260f, customs, customMoodDefs)
+        drawLabel(canvas, entry, 900f, 92f, Color.WHITE, lang, customs, customMoodDefs)
         drawStars(canvas, entry, 1010f, 68f, moodColor)
 
-        drawNote(canvas, entry, 1200f, 50f, Color.parseColor("#CCCCCC"), (W * 0.75).toInt())
-        if (date) drawDate(canvas, entry, H - 260f, 42f, Color.parseColor("#888888"))
-        if (wm) drawWatermark(canvas, H - 180f, 34f, Color.parseColor("#555555"))
+        drawNote(canvas, entry, 1200f, 50f, "#CCCCCC".toColorInt(), (W * 0.75).toInt())
+        if (date) drawDate(canvas, entry, H - 260f, 42f, "#888888".toColorInt(), lang)
+        if (wm) drawWatermark(canvas, H - 180f, 34f, "#555555".toColorInt(), lang)
     }
 
-    private fun drawNoteTemplate(canvas: Canvas, entry: MoodEntry, wm: Boolean, date: Boolean) {
+    /* ================= 便签 ================= */
+
+    private fun drawNoteTemplate(
+        canvas: Canvas, entry: MoodEntry,
+        wm: Boolean, date: Boolean, lang: String,
+        customs: Map<Mood, CustomMoodStyle>,
+        customMoodDefs: List<CustomMoodDef>
+    ) {
         val moodColor = moodMainColor(entry.mood)
-        canvas.drawColor(Color.parseColor("#F0F0F2"))
+        canvas.drawColor("#F0F0F2".toColorInt())
 
         val padLeft = 80f
         val padTop = 300f
@@ -267,7 +443,7 @@ object ShareCardGenerator {
         val padBottom = H - 300f
 
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#20000000")
+            color = "#20000000".toColorInt()
         }
         canvas.drawRoundRect(
             RectF(padLeft + 10f, padTop + 15f, padRight + 10f, padBottom + 15f),
@@ -275,19 +451,16 @@ object ShareCardGenerator {
         )
 
         val paperPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FFF7D6")
+            color = "#FFF7D6".toColorInt()
         }
         canvas.drawRoundRect(
-            RectF(padLeft, padTop, padRight, padBottom),
-            40f, 40f, paperPaint
+            RectF(padLeft, padTop, padRight, padBottom), 40f, 40f, paperPaint
         )
 
         val clipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = moodColor }
         val clipPath = Path().apply {
-            addRoundRect(
-                RectF(padLeft, padTop, padRight, padTop + 30f),
-                40f, 40f, Path.Direction.CW
-            )
+            addRoundRect(RectF(padLeft, padTop, padRight, padTop + 30f),
+                40f, 40f, Path.Direction.CW)
         }
         canvas.save()
         canvas.clipRect(padLeft, padTop, padRight, padTop + 40f)
@@ -299,43 +472,37 @@ object ShareCardGenerator {
         val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 200f; textAlign = Paint.Align.CENTER
         }
-        canvas.drawText(entry.mood.emoji, centerX, padTop + 320f, emojiPaint)
+        canvas.drawText(finalEmoji(entry, customs, customMoodDefs), centerX, padTop + 320f, emojiPaint)
 
         val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#3A3226")
-            textSize = 80f
+            color = "#3A3226".toColorInt(); textSize = 80f
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        canvas.drawText(entry.mood.label, centerX, padTop + 460f, labelPaint)
+        canvas.drawText(finalLabel(entry, customs, customMoodDefs, lang), centerX, padTop + 460f, labelPaint)
 
         val starPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = moodColor
-            textSize = 56f
-            textAlign = Paint.Align.CENTER
+            color = moodColor; textSize = 56f; textAlign = Paint.Align.CENTER
         }
         canvas.drawText(starString(entry.intensity), centerX, padTop + 560f, starPaint)
 
         if (entry.note.isNotBlank()) {
             val notePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#5A5040")
-                textSize = 46f
+                color = "#5A5040".toColorInt(); textSize = 46f
                 textAlign = Paint.Align.CENTER
             }
             val lines = wrapText(entry.note, notePaint, ((padRight - padLeft - 120)).toInt())
             var y = padTop + 680f
             lines.take(6).forEach { line ->
-                canvas.drawText(line, centerX, y, notePaint)
-                y += 68f
+                canvas.drawText(line, centerX, y, notePaint); y += 68f
             }
         }
 
         if (date) {
-            val dateSdf = SimpleDateFormat("yyyy.MM.dd  EEEE", Locale.CHINA)
+            val dateSdf = SimpleDateFormat("yyyy.MM.dd  EEEE", localeOf(lang))
             val dateText = dateSdf.format(Date(entry.dayStart))
             val datePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#8A7F6B")
-                textSize = 36f
+                color = "#8A7F6B".toColorInt(); textSize = 36f
                 textAlign = Paint.Align.CENTER
             }
             canvas.drawText(dateText, centerX, padBottom - 120f, datePaint)
@@ -343,37 +510,44 @@ object ShareCardGenerator {
 
         if (wm) {
             val markPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#AA9F88")
-                textSize = 32f
+                color = "#AA9F88".toColorInt(); textSize = 32f
                 textAlign = Paint.Align.CENTER
             }
-            canvas.drawText("— 每日情绪账本 —", centerX, padBottom - 60f, markPaint)
+            canvas.drawText(L.t("watermark_text", lang), centerX, padBottom - 60f, markPaint)
         }
     }
 
-    private fun drawEmoji(canvas: Canvas, entry: MoodEntry, y: Float, size: Float) {
+    /* ================= 通用绘制 ================= */
+
+    private fun drawEmoji(
+        canvas: Canvas, entry: MoodEntry, y: Float, size: Float,
+        customs: Map<Mood, CustomMoodStyle>,
+        customMoodDefs: List<CustomMoodDef>
+    ) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = size; textAlign = Paint.Align.CENTER
         }
-        canvas.drawText(entry.mood.emoji, W / 2f, y, paint)
+        canvas.drawText(finalEmoji(entry, customs, customMoodDefs), W / 2f, y, paint)
     }
 
-    private fun drawLabel(canvas: Canvas, entry: MoodEntry, y: Float, size: Float, color: Int) {
+    private fun drawLabel(
+        canvas: Canvas, entry: MoodEntry, y: Float, size: Float,
+        color: Int, lang: String,
+        customs: Map<Mood, CustomMoodStyle>,
+        customMoodDefs: List<CustomMoodDef>
+    ) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = color
-            textSize = size
+            this.color = color; textSize = size
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        canvas.drawText(entry.mood.label, W / 2f, y, paint)
+        canvas.drawText(finalLabel(entry, customs, customMoodDefs, lang), W / 2f, y, paint)
     }
 
     private fun drawStars(canvas: Canvas, entry: MoodEntry, y: Float, size: Float, color: Int) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = color
-            textSize = size
-            textAlign = Paint.Align.CENTER
-            alpha = 220
+            this.color = color; textSize = size
+            textAlign = Paint.Align.CENTER; alpha = 220
         }
         canvas.drawText(starString(entry.intensity), W / 2f, y, paint)
     }
@@ -384,62 +558,60 @@ object ShareCardGenerator {
     ) {
         if (entry.note.isBlank()) return
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = color
-            textSize = size
-            textAlign = Paint.Align.CENTER
+            this.color = color; textSize = size; textAlign = Paint.Align.CENTER
         }
         val lines = wrapText(entry.note, paint, maxWidth)
         var y = startY
         lines.take(5).forEach { line ->
-            canvas.drawText(line, W / 2f, y, paint)
-            y += size * 1.5f
+            canvas.drawText(line, W / 2f, y, paint); y += size * 1.5f
         }
     }
 
-    private fun drawDate(canvas: Canvas, entry: MoodEntry, y: Float, size: Float, color: Int) {
+    private fun drawDate(
+        canvas: Canvas, entry: MoodEntry, y: Float, size: Float,
+        color: Int, lang: String
+    ) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = color
-            textSize = size
-            textAlign = Paint.Align.CENTER
-            alpha = 200
+            this.color = color; textSize = size
+            textAlign = Paint.Align.CENTER; alpha = 200
         }
-        val dateStr = SimpleDateFormat("yyyy.MM.dd  EEEE", Locale.CHINA)
+        val dateStr = SimpleDateFormat("yyyy.MM.dd  EEEE", localeOf(lang))
             .format(Date(entry.dayStart))
         canvas.drawText(dateStr, W / 2f, y, paint)
     }
 
-    private fun drawWatermark(canvas: Canvas, y: Float, size: Float, color: Int) {
+    private fun drawWatermark(
+        canvas: Canvas, y: Float, size: Float, color: Int, lang: String
+    ) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = color
-            textSize = size
-            textAlign = Paint.Align.CENTER
-            alpha = 140
+            this.color = color; textSize = size
+            textAlign = Paint.Align.CENTER; alpha = 140
         }
-        canvas.drawText("— 每日情绪账本 —", W / 2f, y, paint)
+        canvas.drawText(L.t("watermark_text", lang), W / 2f, y, paint)
     }
 
     private fun bgColors(mood: Mood): Pair<Int, Int> = when (mood) {
-        Mood.HAPPY   -> Color.parseColor("#FFE9B0") to Color.parseColor("#FFB86B")
-        Mood.CALM    -> Color.parseColor("#D6F1EF") to Color.parseColor("#9CC5C0")
-        Mood.SAD     -> Color.parseColor("#C6D2E8") to Color.parseColor("#7B93B8")
-        Mood.ANGRY   -> Color.parseColor("#FFD1CF") to Color.parseColor("#E07070")
-        Mood.ANXIOUS -> Color.parseColor("#E8D1F0") to Color.parseColor("#B589C9")
+        Mood.HAPPY   -> "#FFE9B0".toColorInt() to "#FFB86B".toColorInt()
+        Mood.CALM    -> "#D6F1EF".toColorInt() to "#9CC5C0".toColorInt()
+        Mood.SAD     -> "#C6D2E8".toColorInt() to "#7B93B8".toColorInt()
+        Mood.ANGRY   -> "#FFD1CF".toColorInt() to "#E07070".toColorInt()
+        Mood.ANXIOUS -> "#E8D1F0".toColorInt() to "#B589C9".toColorInt()
     }
 
     private fun darkTextColor(mood: Mood): Int = when (mood) {
-        Mood.HAPPY   -> Color.parseColor("#7A4A00")
-        Mood.CALM    -> Color.parseColor("#1E4A47")
-        Mood.SAD     -> Color.parseColor("#1F2F4A")
-        Mood.ANGRY   -> Color.parseColor("#7A1010")
-        Mood.ANXIOUS -> Color.parseColor("#3F1E4A")
+        Mood.HAPPY   -> "#7A4A00".toColorInt()
+        Mood.CALM    -> "#1E4A47".toColorInt()
+        Mood.SAD     -> "#1F2F4A".toColorInt()
+        Mood.ANGRY   -> "#7A1010".toColorInt()
+        Mood.ANXIOUS -> "#3F1E4A".toColorInt()
     }
 
     private fun moodMainColor(mood: Mood): Int = when (mood) {
-        Mood.HAPPY   -> Color.parseColor("#F5A623")
-        Mood.CALM    -> Color.parseColor("#4CAF93")
-        Mood.SAD     -> Color.parseColor("#5B7DB1")
-        Mood.ANGRY   -> Color.parseColor("#E05353")
-        Mood.ANXIOUS -> Color.parseColor("#9C6BC7")
+        Mood.HAPPY   -> "#F5A623".toColorInt()
+        Mood.CALM    -> "#4CAF93".toColorInt()
+        Mood.SAD     -> "#5B7DB1".toColorInt()
+        Mood.ANGRY   -> "#E05353".toColorInt()
+        Mood.ANXIOUS -> "#9C6BC7".toColorInt()
     }
 
     private fun starString(n: Int): String {

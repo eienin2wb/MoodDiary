@@ -3,6 +3,8 @@ package com.example.mooddiary.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import com.example.mooddiary.data.CardAppearance
+import com.example.mooddiary.data.CustomMoodDef
+import com.example.mooddiary.data.CustomMoodStyle
 import com.example.mooddiary.data.Mood
 import com.example.mooddiary.data.MoodEntry
 import com.example.mooddiary.data.ShareSettings
@@ -33,11 +35,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _uiStyle = MutableStateFlow(storage.uiStyle)
     val uiStyle: StateFlow<String> = _uiStyle.asStateFlow()
 
+    private val _language = MutableStateFlow(storage.language)
+    val language: StateFlow<String> = _language.asStateFlow()
+
     private val _cardAppearance = MutableStateFlow(storage.loadCardAppearance())
     val cardAppearance: StateFlow<CardAppearance> = _cardAppearance.asStateFlow()
 
     private val _shareSettings = MutableStateFlow(storage.loadShareSettings())
     val shareSettings: StateFlow<ShareSettings> = _shareSettings.asStateFlow()
+
+    private val _customMoods = MutableStateFlow(storage.loadCustomMoods())
+    val customMoods: StateFlow<Map<Mood, CustomMoodStyle>> = _customMoods.asStateFlow()
+
+    /** 用户新增的情绪列表 */
+    private val _customMoodDefs = MutableStateFlow(storage.loadCustomMoodDefs())
+    val customMoodDefs: StateFlow<List<CustomMoodDef>> = _customMoodDefs.asStateFlow()
 
     init { refresh() }
 
@@ -52,9 +64,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         mood: Mood,
         intensity: Int,
         note: String,
-        dayStart: Long = Storage.todayStart()
+        dayStart: Long = Storage.todayStart(),
+        imageUri: String? = null,
+        customMoodId: String? = null
     ) {
-        storage.upsert(mood, intensity, note, dayStart)
+        storage.upsert(mood, intensity, note, dayStart, imageUri, customMoodId)
         refresh()
     }
 
@@ -71,6 +85,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _uiStyle.value = style
     }
 
+    fun setLanguage(lang: String) {
+        storage.language = lang
+        _language.value = lang
+    }
+
     fun updateCardAppearance(a: CardAppearance) {
         storage.saveCardAppearance(a)
         _cardAppearance.value = a
@@ -81,15 +100,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _shareSettings.value = s
     }
 
-    /** 保存自定义背景照片的 URI（同时切到 photo 背景） */
-    fun setCardImageUri(uri: String?) {
-        val current = _cardAppearance.value
-        val updated = current.copy(
-            imageUri = uri,
-            background = if (uri != null) "photo" else "glass"
-        )
-        storage.saveCardAppearance(updated)
-        _cardAppearance.value = updated
+    fun setCustomMood(mood: Mood, style: CustomMoodStyle) {
+        val current = _customMoods.value.toMutableMap()
+        if (style.isEmpty) current.remove(mood) else current[mood] = style
+        storage.saveCustomMoods(current)
+        _customMoods.value = current
+    }
+
+    /** 新增一个自定义情绪，返回其 id */
+    fun addCustomMoodDef(emoji: String, label: String): String {
+        val id = "cm_" + System.currentTimeMillis()
+        val def = CustomMoodDef(id = id, emoji = emoji, label = label)
+        val newList = _customMoodDefs.value + def
+        storage.saveCustomMoodDefs(newList)
+        _customMoodDefs.value = newList
+        return id
+    }
+
+    /** 删除一个自定义情绪 */
+    fun deleteCustomMoodDef(id: String) {
+        val newList = _customMoodDefs.value.filter { it.id != id }
+        storage.saveCustomMoodDefs(newList)
+        _customMoodDefs.value = newList
+    }
+
+    fun updateEntryImage(dayStart: Long, uri: String?) {
+        storage.updateImage(dayStart, uri)
+        refresh()
     }
 
     fun findEntry(dayStart: Long): MoodEntry? = storage.findByDay(dayStart)
