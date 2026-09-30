@@ -2,8 +2,10 @@ package com.example.mooddiary.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import com.example.mooddiary.data.CardAppearance
 import com.example.mooddiary.data.Mood
 import com.example.mooddiary.data.MoodEntry
+import com.example.mooddiary.data.ShareSettings
 import com.example.mooddiary.data.Storage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,31 +15,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val storage = Storage(app)
 
-    // ---------- 状态流 ----------
-
-    /** 所有记录（时间倒序） */
     private val _entries = MutableStateFlow<List<MoodEntry>>(emptyList())
     val entries: StateFlow<List<MoodEntry>> = _entries.asStateFlow()
 
-    /** 今天的记录（没记则为 null） */
     private val _todayEntry = MutableStateFlow<MoodEntry?>(null)
     val todayEntry: StateFlow<MoodEntry?> = _todayEntry.asStateFlow()
 
-    /** 连续打卡天数 */
     private val _streak = MutableStateFlow(0)
     val streak: StateFlow<Int> = _streak.asStateFlow()
 
-    /** 各种情绪的次数 */
     private val _moodCounts = MutableStateFlow<Map<Mood, Int>>(emptyMap())
     val moodCounts: StateFlow<Map<Mood, Int>> = _moodCounts.asStateFlow()
 
-    /** 卡片样式："plain" = 纯色，"gradient" = 渐变 */
     private val _cardStyle = MutableStateFlow(storage.cardStyle)
     val cardStyle: StateFlow<String> = _cardStyle.asStateFlow()
 
-    init {
-        refresh()
-    }
+    private val _uiStyle = MutableStateFlow(storage.uiStyle)
+    val uiStyle: StateFlow<String> = _uiStyle.asStateFlow()
+
+    private val _cardAppearance = MutableStateFlow(storage.loadCardAppearance())
+    val cardAppearance: StateFlow<CardAppearance> = _cardAppearance.asStateFlow()
+
+    private val _shareSettings = MutableStateFlow(storage.loadShareSettings())
+    val shareSettings: StateFlow<ShareSettings> = _shareSettings.asStateFlow()
+
+    init { refresh() }
 
     private fun refresh() {
         _entries.value = storage.allSorted()
@@ -45,8 +47,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _streak.value = storage.streakDays()
         _moodCounts.value = storage.moodCounts()
     }
-
-    // ---------- 业务操作 ----------
 
     fun saveEntry(
         mood: Mood,
@@ -58,24 +58,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
-    fun deleteEntry(id: Long) {
-        storage.delete(id)
-        refresh()
-    }
+    fun deleteEntry(id: Long) { storage.delete(id); refresh() }
+    fun clearAll() { storage.clearAll(); refresh() }
 
-    /** 清空所有记录 */
-    fun clearAll() {
-        storage.clearAll()
-        refresh()
-    }
-
-    /** 切换卡片样式（纯色 ⇄ 渐变） */
     fun setCardStyle(style: String) {
         storage.cardStyle = style
         _cardStyle.value = style
     }
 
-    /** 查某天的记录（用于弹窗回显） */
+    fun setUiStyle(style: String) {
+        storage.uiStyle = style
+        _uiStyle.value = style
+    }
+
+    fun updateCardAppearance(a: CardAppearance) {
+        storage.saveCardAppearance(a)
+        _cardAppearance.value = a
+    }
+
+    fun updateShareSettings(s: ShareSettings) {
+        storage.saveShareSettings(s)
+        _shareSettings.value = s
+    }
+
+    /** 保存自定义背景照片的 URI（同时切到 photo 背景） */
+    fun setCardImageUri(uri: String?) {
+        val current = _cardAppearance.value
+        val updated = current.copy(
+            imageUri = uri,
+            background = if (uri != null) "photo" else "glass"
+        )
+        storage.saveCardAppearance(updated)
+        _cardAppearance.value = updated
+    }
+
     fun findEntry(dayStart: Long): MoodEntry? = storage.findByDay(dayStart)
 
     companion object {

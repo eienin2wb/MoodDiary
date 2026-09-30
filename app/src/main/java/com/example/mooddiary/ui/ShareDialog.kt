@@ -20,7 +20,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.mooddiary.data.CardAppearance
 import com.example.mooddiary.data.MoodEntry
+import com.example.mooddiary.data.ShareSettings
 import com.example.mooddiary.util.CardTemplate
 import com.example.mooddiary.util.ImageSaver
 import com.example.mooddiary.util.ShareCardGenerator
@@ -29,15 +31,58 @@ import com.example.mooddiary.util.ShareHelper
 @Composable
 fun ShareDialog(
     entry: MoodEntry,
+    settings: ShareSettings,
+    cardAppearance: CardAppearance,
+    onSettingsChange: (ShareSettings) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
 
-    var template by remember { mutableStateOf(CardTemplate.CLASSIC) }
+    val template = CardTemplate.entries.firstOrNull {
+        it.name.lowercase() == settings.template
+    } ?: CardTemplate.CLASSIC
 
-    // 模板变化时重新生成
-    val bitmap = remember(entry.id, template) {
-        ShareCardGenerator.generate(entry, template)
+    val usePhoto = settings.useCustomPhoto && cardAppearance.imageUri != null
+
+    val bitmap = remember(
+        entry.id,
+        settings.template,
+        settings.showWatermark,
+        settings.showDate,
+        settings.useCustomPhoto,
+        cardAppearance.imageUri
+    ) {
+        if (usePhoto) {
+            val photo = try {
+                val input = context.contentResolver.openInputStream(
+                    android.net.Uri.parse(cardAppearance.imageUri)
+                )
+                android.graphics.BitmapFactory.decodeStream(input)
+            } catch (e: Exception) { null }
+
+            if (photo != null) {
+                ShareCardGenerator.generateWithPhoto(
+                    entry = entry,
+                    photo = photo,
+                    showWatermark = settings.showWatermark,
+                    showDate = settings.showDate
+                )
+            } else {
+                ShareCardGenerator.generate(
+                    entry = entry,
+                    template = template,
+                    showWatermark = settings.showWatermark,
+                    showDate = settings.showDate
+                )
+            }
+        } else {
+            ShareCardGenerator.generate(
+                entry = entry,
+                template = template,
+                showWatermark = settings.showWatermark,
+                showDate = settings.showDate
+            )
+        }
     }
 
     AlertDialog(
@@ -50,15 +95,14 @@ fun ShareDialog(
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // ---- 模板选择 ----
                 LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(CardTemplate.values().toList()) { t ->
-                        val selected = t == template
+                    items(CardTemplate.entries.toList()) { t ->
+                        val selected = t.name.lowercase() == settings.template
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
@@ -66,18 +110,15 @@ fun ShareDialog(
                                     if (selected) MaterialTheme.colorScheme.primaryContainer
                                     else MaterialTheme.colorScheme.surfaceVariant
                                 )
-                                .clickable { template = t }
+                                .clickable {
+                                    onSettingsChange(settings.copy(template = t.name.lowercase()))
+                                }
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
                         ) {
                             Text(
                                 t.label,
                                 style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (selected) FontWeight.Bold
-                                else FontWeight.Normal,
-                                color = if (selected)
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                else
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
                             )
                         }
                     }
@@ -85,7 +126,6 @@ fun ShareDialog(
 
                 Spacer(Modifier.height(12.dp))
 
-                // ---- 图片预览 ----
                 Image(
                     bitmap = bitmap.asImageBitmap(),
                     contentDescription = "预览",

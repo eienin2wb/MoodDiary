@@ -6,32 +6,66 @@ import org.json.JSONObject
 import java.io.File
 import java.util.Calendar
 
-/**
- * 情绪日记的简易存储。
- * 数据文件：App 内部存储 filesDir/mood_diary.json
- */
 class Storage(context: Context) {
 
     private val file = File(context.filesDir, "mood_diary.json")
-
-    // ---------- 偏好设置 ----------
     private val prefs = context.getSharedPreferences("mood_prefs", Context.MODE_PRIVATE)
 
-    /** 卡片样式："plain" = 纯色（默认），"gradient" = 渐变 */
+    // ---------- 偏好设置 ----------
+
     var cardStyle: String
         get() = prefs.getString("card_style", "plain") ?: "plain"
-        set(value) {
-            prefs.edit().putString("card_style", value).apply()
-        }
+        set(value) { prefs.edit().putString("card_style", value).apply() }
 
-    /** 内存中的记录列表 */
-    val entries: MutableList<MoodEntry> = mutableListOf()
+    var uiStyle: String
+        get() = prefs.getString("ui_style", "ios") ?: "ios"
+        set(value) { prefs.edit().putString("ui_style", value).apply() }
 
-    init {
-        load()
+    // ---------- 卡片外观 ----------
+
+    fun loadCardAppearance(): CardAppearance = CardAppearance(
+        background = prefs.getString("card_bg", "glass") ?: "glass",
+        imageUri = prefs.getString("card_image_uri", null),
+        showEmoji = prefs.getBoolean("card_show_emoji", true),
+        showDate = prefs.getBoolean("card_show_date", true),
+        showStars = prefs.getBoolean("card_show_stars", true),
+        cornerRadius = prefs.getInt("card_radius", 16),
+    )
+
+    fun saveCardAppearance(a: CardAppearance) {
+        prefs.edit()
+            .putString("card_bg", a.background)
+            .putString("card_image_uri", a.imageUri)
+            .putBoolean("card_show_emoji", a.showEmoji)
+            .putBoolean("card_show_date", a.showDate)
+            .putBoolean("card_show_stars", a.showStars)
+            .putInt("card_radius", a.cornerRadius)
+            .apply()
     }
 
-    // ---------------- 读写文件 ----------------
+    // ---------- 分享卡片 ----------
+
+    fun loadShareSettings(): ShareSettings = ShareSettings(
+        template = prefs.getString("share_template", "classic") ?: "classic",
+        showWatermark = prefs.getBoolean("share_watermark", true),
+        showDate = prefs.getBoolean("share_show_date", true),
+        useCustomPhoto = prefs.getBoolean("share_use_photo", false),
+    )
+
+    fun saveShareSettings(s: ShareSettings) {
+        prefs.edit()
+            .putString("share_template", s.template)
+            .putBoolean("share_watermark", s.showWatermark)
+            .putBoolean("share_show_date", s.showDate)
+            .putBoolean("share_use_photo", s.useCustomPhoto)
+            .apply()
+    }
+
+    // ---------- 数据 ----------
+
+    val entries: MutableList<MoodEntry> = mutableListOf()
+
+    init { load() }
 
     private fun load() {
         if (!file.exists()) return
@@ -50,9 +84,7 @@ class Storage(context: Context) {
                     )
                 )
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
     private fun save() {
@@ -68,60 +100,28 @@ class Storage(context: Context) {
                 arr.put(o)
             }
             file.writeText(arr.toString())
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
-    // ---------------- 业务操作 ----------------
-
-    /**
-     * 添加或更新某天的记录。
-     * 同一天已存在则覆盖（一天只保留一条）。
-     */
     fun upsert(mood: Mood, intensity: Int, note: String, dayStart: Long): MoodEntry {
         entries.removeAll { it.dayStart == dayStart }
         val id = (entries.maxOfOrNull { it.id } ?: 0L) + 1
-        val entry = MoodEntry(
-            id = id,
-            mood = mood,
-            intensity = intensity,
-            note = note,
-            dayStart = dayStart
-        )
+        val entry = MoodEntry(id, mood, intensity, note, dayStart)
         entries.add(entry)
         save()
         return entry
     }
 
-    fun delete(id: Long) {
-        entries.removeAll { it.id == id }
-        save()
-    }
-
-    /** 清空所有记录 */
-    fun clearAll() {
-        entries.clear()
-        save()
-    }
-
-    /** 查某一天的记录，没有返回 null */
-    fun findByDay(dayStart: Long): MoodEntry? =
-        entries.firstOrNull { it.dayStart == dayStart }
-
-    /** 所有记录，按日期倒序 */
+    fun delete(id: Long) { entries.removeAll { it.id == id }; save() }
+    fun clearAll() { entries.clear(); save() }
+    fun findByDay(dayStart: Long): MoodEntry? = entries.firstOrNull { it.dayStart == dayStart }
     fun allSorted(): List<MoodEntry> = entries.sortedByDescending { it.dayStart }
 
-    // ---------------- 统计 ----------------
-
-    /** 连续打卡天数（从今天或昨天往前连续） */
     fun streakDays(): Int {
         if (entries.isEmpty()) return 0
-
         val today = todayStart()
         val hasToday = entries.any { it.dayStart == today }
         var cursor = if (hasToday) today else today - DAY_MS
-
         var count = 0
         while (entries.any { it.dayStart == cursor }) {
             count++
@@ -130,35 +130,12 @@ class Storage(context: Context) {
         return count
     }
 
-    /** 这个月记录了多少天 */
-    fun monthRecordCount(year: Int, month: Int): Int {
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.YEAR, year)
-        cal.set(Calendar.MONTH, month)
-        cal.set(Calendar.DAY_OF_MONTH, 1)
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        val start = cal.timeInMillis
-
-        cal.add(Calendar.MONTH, 1)
-        val end = cal.timeInMillis
-
-        return entries.count { it.dayStart in start until end }
-    }
-
-    /** 各种情绪的总次数 */
-    fun moodCounts(): Map<Mood, Int> {
-        return Mood.values().associateWith { m ->
-            entries.count { it.mood == m }
-        }
-    }
+    fun moodCounts(): Map<Mood, Int> =
+        Mood.values().associateWith { m -> entries.count { it.mood == m } }
 
     companion object {
         const val DAY_MS = 24L * 60 * 60 * 1000
 
-        /** 把毫秒时间戳归零到当天 00:00 */
         fun toDayStart(millis: Long): Long {
             val cal = Calendar.getInstance()
             cal.timeInMillis = millis
@@ -169,7 +146,6 @@ class Storage(context: Context) {
             return cal.timeInMillis
         }
 
-        /** 今天 00:00 */
         fun todayStart(): Long = toDayStart(System.currentTimeMillis())
     }
 }
