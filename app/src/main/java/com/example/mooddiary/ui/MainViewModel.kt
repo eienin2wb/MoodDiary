@@ -2,16 +2,20 @@ package com.example.mooddiary.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.mooddiary.data.CardAppearance
 import com.example.mooddiary.data.CustomMoodDef
 import com.example.mooddiary.data.CustomMoodStyle
+import com.example.mooddiary.data.DiaryEntry
 import com.example.mooddiary.data.Mood
 import com.example.mooddiary.data.MoodEntry
 import com.example.mooddiary.data.ShareSettings
 import com.example.mooddiary.data.Storage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -19,6 +23,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _entries = MutableStateFlow<List<MoodEntry>>(emptyList())
     val entries: StateFlow<List<MoodEntry>> = _entries.asStateFlow()
+
+    /** 日记，与 [entries] 是两套独立数据。 */
+    private val _diaries = MutableStateFlow<List<DiaryEntry>>(emptyList())
+    val diaries: StateFlow<List<DiaryEntry>> = _diaries.asStateFlow()
 
     private val _todayEntry = MutableStateFlow<MoodEntry?>(null)
     val todayEntry: StateFlow<MoodEntry?> = _todayEntry.asStateFlow()
@@ -51,10 +59,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _customMoodDefs = MutableStateFlow(storage.loadCustomMoodDefs())
     val customMoodDefs: StateFlow<List<CustomMoodDef>> = _customMoodDefs.asStateFlow()
 
-    init { refresh() }
+    init {
+        viewModelScope.launch(Dispatchers.IO) { refresh() }
+    }
 
     private fun refresh() {
         _entries.value = storage.allSorted()
+        _diaries.value = storage.allDiariesSorted()
         _todayEntry.value = storage.findByDay(Storage.todayStart())
         _streak.value = storage.streakDays()
         _moodCounts.value = storage.moodCounts()
@@ -68,12 +79,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         imageUri: String? = null,
         customMoodId: String? = null
     ) {
-        storage.upsert(mood, intensity, note, dayStart, imageUri, customMoodId)
-        refresh()
+        viewModelScope.launch(Dispatchers.IO) {
+            storage.upsert(mood, intensity, note, dayStart, imageUri, customMoodId)
+            refresh()
+        }
     }
 
-    fun deleteEntry(id: Long) { storage.delete(id); refresh() }
-    fun clearAll() { storage.clearAll(); refresh() }
+    fun deleteEntry(id: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            storage.delete(id)
+            refresh()
+        }
+    }
+
+    fun clearAll() {
+        viewModelScope.launch(Dispatchers.IO) {
+            storage.clearAll()
+            refresh()
+        }
+    }
+
+    fun saveDiary(
+        id: Long?,
+        content: String,
+        dayStart: Long = Storage.todayStart(),
+        imageUri: String? = null,
+        mood: Mood? = null
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            storage.upsertDiary(id, content, dayStart, imageUri, mood)
+            refresh()
+        }
+    }
+
+    fun deleteDiary(id: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            storage.deleteDiary(id)
+            refresh()
+        }
+    }
+
+    fun findDiary(id: Long): DiaryEntry? = storage.findDiary(id)
 
     fun setCardStyle(style: String) {
         storage.cardStyle = style
@@ -125,8 +171,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateEntryImage(dayStart: Long, uri: String?) {
-        storage.updateImage(dayStart, uri)
-        refresh()
+        viewModelScope.launch(Dispatchers.IO) {
+            storage.updateImage(dayStart, uri)
+            refresh()
+        }
     }
 
     fun findEntry(dayStart: Long): MoodEntry? = storage.findByDay(dayStart)

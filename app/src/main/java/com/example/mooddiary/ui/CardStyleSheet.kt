@@ -456,7 +456,6 @@ fun CardStyleSheet(
 
 @Composable
 private fun LivePreviewCard(appearance: CardAppearance, isIos: Boolean, lang: String) {
-    val context = LocalContext.current
     val radius = RoundedCornerShape(appearance.cornerRadius.dp)
 
     Box(
@@ -505,7 +504,7 @@ private fun LivePreviewCard(appearance: CardAppearance, isIos: Boolean, lang: St
             ) {
                 if (appearance.showDate) {
                     Text(
-                        if (isIos) "今天" else "今天",
+                        L.t("today", lang),
                         fontSize = 9.sp,
                         color = Color(0xFF666666)
                     )
@@ -518,7 +517,7 @@ private fun LivePreviewCard(appearance: CardAppearance, isIos: Boolean, lang: St
                     }
                     Column {
                         Text(
-                            "开心",
+                            L.t(Mood.HAPPY.key, lang),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF333333)

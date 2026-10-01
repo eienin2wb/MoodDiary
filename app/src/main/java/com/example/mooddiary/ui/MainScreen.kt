@@ -1,7 +1,20 @@
-﻿package com.example.mooddiary.ui
+package com.example.mooddiary.ui
 
+import android.app.Activity
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -10,16 +23,46 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -28,400 +71,900 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.mooddiary.data.MoodEntry
 import com.example.mooddiary.data.Storage
 import com.example.mooddiary.util.ExportHelper
 import com.example.mooddiary.util.L
+import com.example.mooddiary.util.SelfieCapture
 import kotlinx.coroutines.delay
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.launch
+import androidx.compose.animation.core.animateFloat
+
+/* ================= 来自 MainScreen.kt ================= */
 
 /**
  * 所有弹层 / 面板的状态收敛到一个密封类型。
- * 打开任意一个都自动关闭其它,不再需要手写一堆 showXxx = false。
+ *
+ * 同一时间只允许一个 Overlay 存在，
+ * 因此不需要维护大量 showXxx = false。
  */
 private sealed interface Overlay {
     data class Edit(val dayStart: Long) : Overlay
     data class Share(val entry: MoodEntry) : Overlay
-    object Menu : Overlay
-    object Stats : Overlay
-    object Settings : Overlay
-    object CardStyle : Overlay
-    object DiaryList : Overlay
+
+    data object Menu : Overlay
+    data object Stats : Overlay
+    data object Settings : Overlay
+    data object CardStyle : Overlay
+
+    /**
+     * 快速心情 BottomSheet。
+     *
+     * [photoUri] 非空时表示来自「瞬间」自拍，会在 Sheet 顶部展示缩略图，
+     * 保存时一并写入 [MoodEntry.imageUri]。
+     */
+    data class QuickMood(val photoUri: String? = null) : Overlay
+
+    /** 日记编辑器：id == null 表示新建 */
+    data class DiaryEdit(val id: Long?) : Overlay
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalFoundationApi::class
+)
 @Composable
-fun MainScreen(vm: MainViewModel = viewModel()) {
+fun MainScreen(
+    vm: MainViewModel = viewModel()
+) {
     val context = LocalContext.current
+
+    // ============================================================
+    // State
+    // ============================================================
 
     val entries by vm.entries.collectAsState()
     val todayEntry by vm.todayEntry.collectAsState()
     val streak by vm.streak.collectAsState()
+
     val uiStyle by vm.uiStyle.collectAsState()
     val lang by vm.language.collectAsState()
     val appearance by vm.cardAppearance.collectAsState()
     val shareSettings by vm.shareSettings.collectAsState()
+
     val customMoods by vm.customMoods.collectAsState()
     val customMoodDefs by vm.customMoodDefs.collectAsState()
 
-    // 修复: 真正使用 uiStyle,而不是写死 false
-    val isIos = uiStyle == "ios"
+    /** 日记使用独立的数据流 */
+    val diaries by vm.diaries.collectAsState()
 
-    var overlay by remember { mutableStateOf<Overlay?>(null) }
+    // ============================================================
+    // Appearance
+    // ============================================================
+    // 显式标注为 Boolean，避免类型推断被 imports 里的同名符号污染
+    // （之前出现过被 WideNavigationRailValue 覆盖的报错）
 
-    val openToday: () -> Unit = remember {
-        { overlay = Overlay.Edit(MainViewModel.todayStart()) }
+    val isIos: Boolean = uiStyle == "ios"
+
+    val backgroundColor: Color =
+        if (isIos) {
+            Color(0xFFF5F5FA)
+        } else {
+            MaterialTheme.colorScheme.background
+        }
+
+    val primary: Color =
+        if (isIos) {
+            IosColor.primary
+        } else {
+            MaterialTheme.colorScheme.primary
+        }
+
+    // ============================================================
+    // Navigation / Overlay
+    // ============================================================
+
+    val pagerState = rememberPagerState(
+        pageCount = { 2 }
+    )
+
+    val scope = rememberCoroutineScope()
+
+    var overlay by remember {
+        mutableStateOf<Overlay?>(null)
     }
+
+    // ------------------------------------------------------------
+    // 「瞬间」自拍
+    // ------------------------------------------------------------
+
+    /** 拍照输出的临时文件 URI，拍完拿到结果后清空 */
+    var pendingSelfieUri by remember { mutableStateOf<Uri?>(null) }
+
+    val selfieLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uri = pendingSelfieUri
+        pendingSelfieUri = null
+
+        if (result.resultCode == Activity.RESULT_OK && uri != null) {
+            overlay = Overlay.QuickMood(uri.toString())
+        }
+    }
+
+    /**
+     * 「瞬间」入口：打开前置相机。
+     *
+     * 若设备没有相机应用，弹 Toast 提示。
+     */
+    val launchInstant: () -> Unit = remember {
+        {
+            val uri = SelfieCapture.createUri(context)
+            pendingSelfieUri = uri
+            val ok = SelfieCapture.launch(selfieLauncher, uri)
+            if (!ok) {
+                pendingSelfieUri = null
+                Toast.makeText(
+                    context,
+                    if (lang == "zh") "无法打开相机" else "Camera unavailable",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    /**
+     * 快速心情 BottomSheet（无照片入口）。
+     */
+    val openQuick: () -> Unit = remember {
+        {
+            overlay = Overlay.QuickMood(photoUri = null)
+        }
+    }
+
+    /**
+     * 完整心情编辑器。
+     */
+    val openToday: () -> Unit = remember {
+        {
+            overlay = Overlay.Edit(
+                MainViewModel.todayStart()
+            )
+        }
+    }
+
+    // ============================================================
+    // Main UI
+    // ============================================================
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (isIos) Color(0xFFF5F5FA) else MaterialTheme.colorScheme.background)
+            .background(backgroundColor)
     ) {
-        if (isIos) IosBackground()
+
+        if (isIos) {
+            IosBackground()
+        }
 
         Scaffold(
+            modifier = Modifier.fillMaxSize(),
             containerColor = Color.Transparent,
+
             topBar = {
                 NotionHeader(
-                    title = "Cmpss",
+                    title = " 🍂",
                     subtitle = headerDate(lang),
-                    onInstantClick = openToday,
+
+                    onInstantClick = launchInstant,
                     onMomentClick = openToday,
+
                     onMenuClick = {
-                        overlay = if (overlay is Overlay.Menu) null else Overlay.Menu
+                        overlay =
+                            if (overlay is Overlay.Menu) {
+                                null
+                            } else {
+                                Overlay.Menu
+                            }
                     },
+
                     moreLabel = L.t("menu_more", lang),
+
                     isIos = isIos,
                     lang = lang
                 )
             },
+
             floatingActionButton = {
-                if (isIos) IosFab(onClick = openToday)
-                else MaterialFab(onClick = openToday)
+
+                val onFabClick: () -> Unit =
+                    if (pagerState.currentPage == 1) {
+                        {
+                            overlay = Overlay.DiaryEdit(null)
+                        }
+                    } else {
+                        launchInstant
+                    }
+
+                if (isIos) {
+                    IosFab(onClick = onFabClick)
+                } else {
+                    MaterialFab(onClick = onFabClick)
+                }
             }
         ) { padding ->
+
             Column(
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize()
             ) {
-                Spacer(Modifier.height(4.dp))
 
-                MoodDiaryPager(
-                    todayEntry = todayEntry,
-                    entries = entries,
-                    appearance = appearance,
+                MainTabs(
+                    currentPage = pagerState.currentPage,
                     isIos = isIos,
+                    primary = primary,
                     lang = lang,
-                    customs = customMoods,
-                    customMoodDefs = customMoodDefs,
-                    onEditMood = openToday,
-                    onShareMood = { todayEntry?.let { overlay = Overlay.Share(it) } },
-                    onViewAllDiaries = { overlay = Overlay.DiaryList },
-                    onDiaryClick = { overlay = Overlay.Edit(it.dayStart) }
+
+                    onSelect = { page ->
+                        scope.launch {
+                            pagerState.animateScrollToPage(page)
+                        }
+                    }
                 )
 
-                Spacer(Modifier.height(8.dp))
-                StreakRow(streak, isIos, lang)
+                Spacer(modifier = Modifier.height(4.dp))
 
-                if (isIos) {
-                    IosSectionHeader(
-                        L.t("history", lang),
-                        String.format(L.t("total_count", lang), entries.size)
-                    )
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            L.t("history", lang),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            String.format(L.t("total_count", lang), entries.size),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    beyondViewportPageCount = 1
+                ) { page ->
 
-                if (entries.isEmpty()) {
-                    EmptyState(lang, isIos, onAddClick = openToday)
-                } else {
-                    // 月份格式按语言选择,不再写死 Locale.CHINA
-                    val monthSdf = rememberMonthFormatter(lang)
+                    when (page) {
 
-                    val groups = remember(entries, monthSdf) {
-                        entries.groupBy { monthSdf.format(Date(it.dayStart)) }.toList()
-                    }
-                    // 用 Set<Long> 代替 Map<Long, Boolean>,判断更轻
-                    val firstIds = remember(groups) {
-                        buildSet {
-                            groups.forEach { (_, ms) -> ms.firstOrNull()?.let { add(it.id) } }
+                        0 -> {
+                            HomeTab(
+                                todayEntry = todayEntry,
+                                entries = entries,
+                                streak = streak,
+
+                                appearance = appearance,
+
+                                isIos = isIos,
+                                lang = lang,
+
+                                customs = customMoods,
+                                customMoodDefs = customMoodDefs,
+
+                                onEditMood = openToday,
+
+                                onShareMood = {
+                                    overlay = Overlay.Share(it)
+                                },
+
+                                onEditEntry = {
+                                    overlay = Overlay.Edit(it.dayStart)
+                                },
+
+                                onDeleteEntry = {
+                                    vm.deleteEntry(it.id)
+                                }
+                            )
                         }
-                    }
-                    val lastIds = remember(groups) {
-                        buildSet {
-                            groups.forEach { (_, ms) -> ms.lastOrNull()?.let { add(it.id) } }
-                        }
-                    }
 
-                    LazyColumn(
-                        // 关键: 拿剩余空间,避免被上面变高的 Pager 挤没
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentPadding = PaddingValues(bottom = 100.dp)
-                    ) {
-                        groups.forEach { (monthLabel, monthEntries) ->
-                            item(key = "header_$monthLabel") {
-                                MonthHeader(
-                                    monthLabel, monthEntries, isIos, lang,
-                                    customMoods, customMoodDefs
-                                )
-                            }
-                            items(monthEntries, key = { it.id }) { e ->
-                                TimelineEntryRow(
-                                    entry = e,
-                                    isFirst = e.id in firstIds,
-                                    isLast = e.id in lastIds,
-                                    isIos = isIos,
-                                    lang = lang,
-                                    customs = customMoods,
-                                    customMoodDefs = customMoodDefs,
-                                    appearance = appearance,
-                                    onEdit = { overlay = Overlay.Edit(e.dayStart) },
-                                    onShare = { overlay = Overlay.Share(e) },
-                                    onDelete = { vm.deleteEntry(e.id) }
-                                )
-                            }
+                        1 -> {
+                            DiaryTab(
+                                diaries = diaries,
+
+                                isIos = isIos, lang = lang,
+
+                                onNew = {
+                                    overlay = Overlay.DiaryEdit(null)
+                                },
+
+                                onEdit = {
+                                    overlay = Overlay.DiaryEdit(it.id)
+                                }
+                            )
                         }
                     }
                 }
             }
         }
 
-        // ── 菜单遮罩 ────────────────────────────────────
+        // ============================================================
+        // Menu Scrim
+        // ============================================================
+
         AnimatedVisibility(
             visible = overlay is Overlay.Menu,
-            enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(150)),
+
+            enter = fadeIn(animationSpec = tween(140)),
+            exit = fadeOut(animationSpec = tween(120)),
+
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(99f)
         ) {
-            Box(Modifier.fillMaxSize().clickable { overlay = null })
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Color.Black.copy(
+                            alpha = if (isIos) 0.06f else 0.10f
+                        )
+                    )
+                    .clickable {
+                        overlay = null
+                    }
+            )
         }
 
-        // ── 菜单面板 ────────────────────────────────────
+        // ============================================================
+        // Top Menu
+        // ============================================================
+
         AnimatedVisibility(
             visible = overlay is Overlay.Menu,
-            enter = fadeIn(tween(160)) + scaleIn(
-                initialScale = 0.7f,
-                transformOrigin = TransformOrigin(1f, 0f),
-                animationSpec = tween(220, easing = FastOutSlowInEasing)
-            ),
-            exit = fadeOut(tween(120)) + scaleOut(
-                targetScale = 0.7f,
-                transformOrigin = TransformOrigin(1f, 0f),
-                animationSpec = tween(150)
-            ),
+
+            enter =
+                fadeIn(animationSpec = tween(150)) +
+                        scaleIn(
+                            initialScale = 0.92f,
+                            transformOrigin = TransformOrigin(
+                                pivotFractionX = 1f,
+                                pivotFractionY = 0f
+                            ),
+                            animationSpec = tween(
+                                durationMillis = 220,
+                                easing = FastOutSlowInEasing
+                            )
+                        ),
+
+            exit =
+                fadeOut(animationSpec = tween(100)) +
+                        scaleOut(
+                            targetScale = 0.94f,
+                            transformOrigin = TransformOrigin(
+                                pivotFractionX = 1f,
+                                pivotFractionY = 0f
+                            ),
+                            animationSpec = tween(durationMillis = 140)
+                        ),
+
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
-                .padding(top = 88.dp, end = 16.dp)
+                .padding(top = 84.dp, end = 16.dp)
                 .zIndex(100f)
         ) {
             TopMenuPanel(
                 isIos = isIos,
                 lang = lang,
+
                 onStats = { overlay = Overlay.Stats },
                 onOpenCardStyle = { overlay = Overlay.CardStyle },
-                onBackfill = { overlay = Overlay.Edit(MainViewModel.todayStart() - Storage.DAY_MS) },
+
+                onBackfill = {
+                    overlay = Overlay.Edit(
+                        MainViewModel.todayStart() - Storage.DAY_MS
+                    )
+                },
+
                 onSettings = { overlay = Overlay.Settings }
             )
         }
     }
 
-    // ── 各种弹层 ────────────────────────────────────────
+    // ================================================================
+    // Dialogs
+    // ================================================================
 
-    AnimatedDialog(visible = overlay is Overlay.CardStyle) {
+    // ------------------------------------------------
+    // Quick Mood (BottomSheet)
+    // ------------------------------------------------
+
+    val quickState = overlay as? Overlay.QuickMood
+
+    if (quickState != null) {
+        QuickMoodSheet(
+            existingMood = todayEntry?.mood,
+            photoUri = quickState.photoUri,
+            isIos = isIos,
+            lang = lang,
+            customs = customMoods,
+
+            onPick = { mood ->
+                vm.saveEntry(
+                    mood = mood,
+                    intensity = 3,
+                    note = "",
+                    dayStart = MainViewModel.todayStart(),
+                    imageUri = quickState.photoUri,
+                    customMoodId = null
+                )
+                overlay = null
+            },
+
+            onOpenFull = {
+                overlay = Overlay.Edit(MainViewModel.todayStart())
+            },
+
+            onDismiss = {
+                overlay = null
+            }
+        )
+    }
+
+    // ------------------------------------------------
+    // Mood Edit (BottomSheet)
+    // ------------------------------------------------
+
+    val editState = overlay as? Overlay.Edit
+
+    if (editState != null) {
+        EditDialog(
+            initialDay = editState.dayStart,
+
+            isIos = isIos, lang = lang,
+
+            customs = customMoods,
+            customMoodDefs = customMoodDefs,
+
+            findExisting = { vm.findEntry(it) },
+
+            onCustomSave = { mood, style ->
+                vm.setCustomMood(mood, style)
+            },
+
+            onAddCustomMood = { emoji, label ->
+                vm.addCustomMoodDef(emoji, label)
+            },
+
+            onDeleteCustomMood = { id ->
+                vm.deleteCustomMoodDef(id)
+            },
+
+            onDismiss = { overlay = null },
+
+            onSave = {
+                    mood, intensity, note, savedDay, imageUri, customMoodId ->
+
+                vm.saveEntry(
+                    mood, intensity, note,
+                    savedDay, imageUri, customMoodId
+                )
+
+                overlay = null
+            },
+
+            onDelete = { dayStart ->
+                val e = vm.findEntry(dayStart)
+                if (e != null) {
+                    vm.deleteEntry(e.id)
+                    overlay = null
+                }
+            }
+        )
+    }
+
+    // ------------------------------------------------
+    // Card Style
+    // ------------------------------------------------
+
+    AnimatedDialog(
+        visible = overlay is Overlay.CardStyle
+    ) {
         CardStyleSheet(
             appearance = appearance,
             shareSettings = shareSettings,
-            isIos = isIos,
-            lang = lang,
+
+            isIos = isIos, lang = lang,
+
             onAppearanceChange = { vm.updateCardAppearance(it) },
             onShareSettingsChange = { vm.updateShareSettings(it) },
             onDismiss = { overlay = null }
         )
     }
 
-    val editState = overlay as? Overlay.Edit
-    AnimatedDialog(visible = editState != null) {
-        editState?.let { s ->
-            EditDialog(
-                initialDay = s.dayStart,
-                isIos = isIos,
-                lang = lang,
-                customs = customMoods,
-                customMoodDefs = customMoodDefs,
-                findExisting = { vm.findEntry(it) },
-                onCustomSave = { m, style -> vm.setCustomMood(m, style) },
-                onAddCustomMood = { e, l -> vm.addCustomMoodDef(e, l) },
-                onDeleteCustomMood = { id -> vm.deleteCustomMoodDef(id) },
-                onDismiss = { overlay = null },
-                onSave = { mood, intensity, note, savedDay, imageUri, customMoodId ->
-                    vm.saveEntry(mood, intensity, note, savedDay, imageUri, customMoodId)
-                    overlay = null
-                }
-            )
-        }
-    }
+    // ------------------------------------------------
+    // Share
+    // ------------------------------------------------
 
     val shareState = overlay as? Overlay.Share
+
     AnimatedDialog(visible = shareState != null) {
-        shareState?.let { s ->
+        shareState?.let { state ->
             ShareDialog(
-                entry = s.entry,
+                entry = state.entry,
+
                 settings = shareSettings,
                 cardAppearance = appearance,
+
                 lang = lang,
+
                 customs = customMoods,
                 customMoodDefs = customMoodDefs,
+
                 onSettingsChange = { vm.updateShareSettings(it) },
                 onDismiss = { overlay = null }
             )
         }
     }
 
-    AnimatedDialog(visible = overlay is Overlay.Stats) {
+    // ------------------------------------------------
+    // Statistics
+    // ------------------------------------------------
+
+    AnimatedDialog(
+        visible = overlay is Overlay.Stats
+    ) {
         StatsDialog(
             entries = entries,
-            isIos = isIos,
-            lang = lang,
+
+            isIos = isIos, lang = lang,
+
             customs = customMoods,
             customMoodDefs = customMoodDefs,
+
             onDismiss = { overlay = null }
         )
     }
 
-    AnimatedDialog(visible = overlay is Overlay.Settings) {
+    // ------------------------------------------------
+    // Settings
+    // ------------------------------------------------
+
+    AnimatedDialog(
+        visible = overlay is Overlay.Settings
+    ) {
         SettingsDialog(
             entries = entries,
-            isIos = isIos,
-            lang = lang,
-            // isIos 现在真实反映当前风格,切回 material 才有效
-            onToggleStyle = { vm.setUiStyle(if (isIos) "material" else "ios") },
+
+            isIos = isIos, lang = lang,
+
+            onToggleStyle = {
+                vm.setUiStyle(if (isIos) "material" else "ios")
+            },
+
             onPickLanguage = { vm.setLanguage(it) },
-            onExport = { ExportHelper.exportCsv(context, entries) },
+
+            onExport = {
+                ExportHelper.exportCsv(context, entries)
+            },
+
             onClearAll = { vm.clearAll() },
+
             onDismiss = { overlay = null }
         )
     }
 
-    AnimatedDialog(visible = overlay is Overlay.DiaryList) {
-        DiaryListDialog(
-            entries = entries,
-            isIos = isIos,
-            lang = lang,
-            customs = customMoods,
-            customMoodDefs = customMoodDefs,
-            onEntryClick = { overlay = Overlay.Edit(it.dayStart) },
-            onDismiss = { overlay = null }
-        )
+    // ------------------------------------------------
+    // Diary Editor
+    // ------------------------------------------------
+
+    val diaryEditState = overlay as? Overlay.DiaryEdit
+
+    AnimatedDialog(
+        visible = diaryEditState != null
+    ) {
+        diaryEditState?.let { state ->
+
+            DiaryEditorDialog(
+                initial = state.id?.let { vm.findDiary(it) },
+
+                isIos = isIos,
+                lang = lang,
+
+                customs = customMoods,
+
+                onSave = { content, dayStart, imageUri, mood ->
+                    vm.saveDiary(
+                        id = state.id,
+                        content = content,
+                        dayStart = dayStart,
+                        imageUri = imageUri,
+                        mood = mood
+                    )
+                    overlay = null
+                },
+
+                onDelete =
+                    if (state.id != null) {
+                        {
+                            vm.deleteDiary(state.id)
+                            overlay = null
+                        }
+                    } else {
+                        null
+                    },
+
+                onDismiss = { overlay = null }
+            )
+        }
     }
 }
 
-/* ================= 抽出来的小组件 ================= */
-
-@Composable
-private fun rememberMonthFormatter(lang: String): SimpleDateFormat = remember(lang) {
-    val cjk = lang.startsWith("zh") || lang.startsWith("ja")
-    val locale = if (cjk) Locale.CHINA else Locale.getDefault()
-    val pattern = if (cjk) "yyyy年M月" else "MMMM yyyy"
-    SimpleDateFormat(pattern, locale)
-}
+/* ================================================================
+ * iOS Background
+ * ================================================================ */
 
 @Composable
 private fun IosBackground() {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        drawRect(brush = Brush.radialGradient(
-            colors = listOf(Color(0xFFB0CEFF), Color.Transparent),
-            center = Offset(size.width * 0.1f, size.height * 0.08f),
-            radius = size.width * 1.3f))
-        drawRect(brush = Brush.radialGradient(
-            colors = listOf(Color(0xFFFFC0DB), Color.Transparent),
-            center = Offset(size.width * 0.95f, size.height * 0.22f),
-            radius = size.width * 1.1f))
-        drawRect(brush = Brush.radialGradient(
-            colors = listOf(Color(0xFFCFBDFF), Color.Transparent),
-            center = Offset(size.width * 0.05f, size.height * 0.75f),
-            radius = size.width * 1.2f))
-        drawRect(brush = Brush.radialGradient(
-            colors = listOf(Color(0xFFA8ECD5), Color.Transparent),
-            center = Offset(size.width * 0.98f, size.height * 0.92f),
-            radius = size.width * 1.0f))
-        drawRect(brush = Brush.radialGradient(
-            colors = listOf(Color(0xFFFFE0B2), Color.Transparent),
-            center = Offset(size.width * 0.6f, size.height * 0.5f),
-            radius = size.width * 0.9f))
+    Canvas(
+        modifier = Modifier.fillMaxSize()
+    ) {
+
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFFB0CEFF).copy(alpha = 0.72f),
+                    Color.Transparent
+                ),
+                center = Offset(
+                    size.width * 0.08f,
+                    size.height * 0.06f
+                ),
+                radius = size.width * 1.45f
+            )
+        )
+
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFFFFC0DB).copy(alpha = 0.62f),
+                    Color.Transparent
+                ),
+                center = Offset(
+                    size.width * 0.96f,
+                    size.height * 0.18f
+                ),
+                radius = size.width * 1.30f
+            )
+        )
+
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFFCFBDFF).copy(alpha = 0.54f),
+                    Color.Transparent
+                ),
+                center = Offset(
+                    size.width * 0.03f,
+                    size.height * 0.78f
+                ),
+                radius = size.width * 1.40f
+            )
+        )
+
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFFA8ECD5).copy(alpha = 0.48f),
+                    Color.Transparent
+                ),
+                center = Offset(
+                    size.width * 1.00f,
+                    size.height * 0.94f
+                ),
+                radius = size.width * 1.20f
+            )
+        )
+
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFFFFE0B2).copy(alpha = 0.32f),
+                    Color.Transparent
+                ),
+                center = Offset(
+                    size.width * 0.58f,
+                    size.height * 0.48f
+                ),
+                radius = size.width * 1.10f
+            )
+        )
     }
 }
 
+/* ================================================================
+ * iOS FAB
+ * ================================================================ */
+
 @Composable
-private fun IosFab(onClick: () -> Unit) {
-    var fabVisible by remember { mutableStateOf(false) }
+private fun IosFab(
+    onClick: () -> Unit
+) {
+    var fabVisible by remember {
+        mutableStateOf(false)
+    }
+
     LaunchedEffect(Unit) {
-        delay(150)
+        delay(120)
         fabVisible = true
     }
+
     val fabScale by animateFloatAsState(
         targetValue = if (fabVisible) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessLow),
+        animationSpec = spring(
+            dampingRatio = 0.62f,
+            stiffness = Spring.StiffnessMediumLow
+        ),
         label = "fabScale"
     )
+
+    val fabElevation by animateDpAsState(
+        targetValue = if (fabVisible) 8.dp else 0.dp,
+        animationSpec = tween(durationMillis = 260),
+        label = "fabElevation"
+    )
+
     Box(
         modifier = Modifier
-            .size(64.dp)
+            .size(62.dp)
             .graphicsLayer {
                 scaleX = fabScale
                 scaleY = fabScale
             }
-            .liquidGlassPro(CircleShape, IosColor.primary.copy(alpha = 0.85f))
+            .shadow(
+                elevation = fabElevation,
+                shape = CircleShape
+            )
+            .clip(CircleShape)
+            .liquidGlassPro(
+                CircleShape,
+                IosColor.primary.copy(alpha = 0.86f)
+            )
             .clickable(onClick = onClick),
+
         contentAlignment = Alignment.Center
     ) {
+
         Icon(
-            Icons.Default.Add,
+            imageVector = Icons.Default.Add,
             contentDescription = "add",
             tint = Color.White,
-            modifier = Modifier.size(30.dp)
+            modifier = Modifier.size(29.dp)
         )
     }
 }
 
+/* ================================================================
+ * Material FAB
+ * ================================================================ */
+
 @Composable
-private fun MaterialFab(onClick: () -> Unit) {
+private fun MaterialFab(
+    onClick: () -> Unit
+) {
     FloatingActionButton(
         onClick = onClick,
+
+        modifier = Modifier.size(58.dp),
+
+        shape = RoundedCornerShape(18.dp),
+
         containerColor = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+
+        elevation = FloatingActionButtonDefaults.elevation(
+            defaultElevation = 6.dp,
+            pressedElevation = 10.dp,
+            focusedElevation = 8.dp,
+            hoveredElevation = 8.dp
+        )
     ) {
+
         Icon(
-            Icons.Default.Add,
+            imageVector = Icons.Default.Add,
             contentDescription = "add",
             modifier = Modifier.size(28.dp)
         )
+    }
+}
+
+/* ================= 来自 ScreenChrome.kt ================= */
+
+@Composable
+internal fun AnimatedDialog(visible: Boolean, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(200)) + scaleIn(
+            initialScale = 0.85f,
+            animationSpec = spring(
+                dampingRatio = 0.75f,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        ),
+        exit = fadeOut(tween(150)) + scaleOut(
+            targetScale = 0.85f,
+            animationSpec = tween(150)
+        )
+    ) {
+        content()
+    }
+}
+
+
+@Composable
+internal fun EmptyState(
+    lang: String,
+    isIos: Boolean,
+    onAddClick: () -> Unit
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "empty")
+
+    val breath by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "breath"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 60.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+
+            Text(
+                "🌱",
+                fontSize = 56.sp,
+                modifier = Modifier.graphicsLayer {
+                    scaleX = breath
+                    scaleY = breath
+                }
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                L.t("empty_hint", lang),
+                color = if (isIos) IosColor.textSecondary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 15.sp
+            )
+
+            Spacer(Modifier.height(24.dp))
+
+            Button(
+                onClick = onAddClick,
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isIos) IosColor.primary
+                    else MaterialTheme.colorScheme.primary
+                ),
+                contentPadding = PaddingValues(
+                    horizontal = 24.dp,
+                    vertical = 12.dp
+                )
+            ) {
+
+                Icon(
+                    Icons.Default.Add,
+                    null,
+                    modifier = Modifier.size(18.dp)
+                )
+
+                Spacer(Modifier.width(6.dp))
+
+                Text(
+                    if (lang == "zh") "记录今天" else "Record Today",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     }
 }
