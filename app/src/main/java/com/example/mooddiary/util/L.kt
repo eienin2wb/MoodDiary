@@ -57,7 +57,7 @@ object L {
             "clear_all" to "清空所有数据",
             "clear_desc" to "不可恢复，请谨慎操作",
             "about" to "关于",
-            "version" to "每日情绪账本 v 1.1(Canary)",
+            "version" to "每日情绪账本 v 1.1.0-alpha01",
             "about_desc" to "记录每一天，你的内心助手",
             "author" to "本软件由魏文彬开发  " +
                     "Copyright © 2026 Cmpss. All Rights Reserved.",
@@ -175,7 +175,7 @@ object L {
             "clear_all" to "Clear All Data",
             "clear_desc" to "This cannot be undone",
             "about" to "About",
-            "version" to "Mood Diary v 1.1(Canary)",
+            "version" to "Mood Diary v 1.1.0-alpha01",
             "about_desc" to "Record every day, your inner assistant.",
             "author" to "Developed by Wenbin Wei  " +
                     "Copyright © 2026 Cmpss. All Rights Reserved.",
@@ -293,7 +293,7 @@ object L {
             "clear_all" to "모든 데이터 삭제",
             "clear_desc" to "복구할 수 없습니다",
             "about" to "정보",
-            "version" to "무드 다이어리 v 1.1(Canary)",
+            "version" to "무드 다이어리 v 1.1.0-alpha01",
             "about_desc" to "매일을 기록하다, 당신의 마음 비서",
             "author" to "Wenbin Wei 제작  " +
                     "Copyright © 2026 Cmpss. All Rights Reserved.",
@@ -411,7 +411,7 @@ object L {
             "clear_all" to "すべてのデータを削除",
             "clear_desc" to "復元できません",
             "about" to "について",
-            "version" to "ムードダイアリー v 1.1(Canary)",
+            "version" to "ムードダイアリー v 1.1.0-alpha01",
             "about_desc" to "毎日を記録する、あなたの心のアシスタント",
             "author" to "Wenbin Wei 開発  " +
                     "Copyright © 2026 Cmpss. All Rights Reserved.",
@@ -529,7 +529,7 @@ object L {
             "clear_all" to "Borrar todos los datos",
             "clear_desc" to "No se puede deshacer",
             "about" to "Acerca de",
-            "version" to "Mood Diary v 1.1(Canary)",
+            "version" to "Mood Diary v 1.1.0-alpha01",
             "about_desc" to "Registra cada día, tu asistente interior.",
             "author" to "Desarrollado por Wenbin Wei  " +
                     "Copyright © 2026 Cmpss. All Rights Reserved.",
