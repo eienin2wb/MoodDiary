@@ -58,7 +58,7 @@ object L {
             "clear_desc" to "不可恢复，请谨慎操作",
             "about" to "关于",
             "version" to "每日情绪账本 v 1.1(Canary)",
-            "about_desc" to "记录每一天的心情，生成精美卡片",
+            "about_desc" to "记录每一天，你的内心助手",
             "author" to "本软件由魏文彬开发  " +
                     "Copyright © 2026 Cmpss. All Rights Reserved.",
             "clear_confirm" to "确定清空所有数据？",
@@ -176,7 +176,7 @@ object L {
             "clear_desc" to "This cannot be undone",
             "about" to "About",
             "version" to "Mood Diary v 1.1(Canary)",
-            "about_desc" to "Record daily moods, generate beautiful cards",
+            "about_desc" to "Record every day, your inner assistant.",
             "author" to "Developed by Wenbin Wei  " +
                     "Copyright © 2026 Cmpss. All Rights Reserved.",
             "clear_confirm" to "Clear all data?",
@@ -294,7 +294,7 @@ object L {
             "clear_desc" to "복구할 수 없습니다",
             "about" to "정보",
             "version" to "무드 다이어리 v 1.1(Canary)",
-            "about_desc" to "매일의 기분을 기록하고 예쁜 카드를 만들어요",
+            "about_desc" to "매일을 기록하다, 당신의 마음 비서",
             "author" to "Wenbin Wei 제작  " +
                     "Copyright © 2026 Cmpss. All Rights Reserved.",
             "clear_confirm" to "모든 데이터를 삭제하시겠어요?",
@@ -412,7 +412,7 @@ object L {
             "clear_desc" to "復元できません",
             "about" to "について",
             "version" to "ムードダイアリー v 1.1(Canary)",
-            "about_desc" to "毎日の気持ちを記録し、素敵なカードを作成",
+            "about_desc" to "毎日を記録する、あなたの心のアシスタント",
             "author" to "Wenbin Wei 開発  " +
                     "Copyright © 2026 Cmpss. All Rights Reserved.",
             "clear_confirm" to "すべてのデータを削除しますか？",
@@ -530,7 +530,7 @@ object L {
             "clear_desc" to "No se puede deshacer",
             "about" to "Acerca de",
             "version" to "Mood Diary v 1.1(Canary)",
-            "about_desc" to "Registra ánimos diarios y crea tarjetas",
+            "about_desc" to "Registra cada día, tu asistente interior.",
             "author" to "Desarrollado por Wenbin Wei  " +
                     "Copyright © 2026 Cmpss. All Rights Reserved.",
             "clear_confirm" to "¿Borrar todos los datos?",
