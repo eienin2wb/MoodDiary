@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -90,7 +91,11 @@ object ShareCardGenerator {
         val canvas = Canvas(bmp)
 
         val src = cropCenter(photo, W, H)
-        canvas.drawBitmap(src, 0f, 0f, null)
+        // cropCenter 保证宽高比正确，但不保证像素尺寸等于 W×H。
+        // 用 dest rect 把裁剪后的图缩放铺满整个画布，
+        // 否则 drawBitmap(src, 0, 0, null) 会按原始像素大小绘制，
+        // 照片比画布小时右侧和底部会出现透明边缘。
+        canvas.drawBitmap(src, null, Rect(0, 0, W, H), null)
         // cropCenter 在目标尺寸恰好等于原图尺寸时会返回同一个引用，
         // 只有真正产生了新 bitmap 才回收，否则会误伤调用方的 photo。
         if (src !== photo) src.recycle()
